@@ -1,11 +1,11 @@
 from util import log_event
-
+import util
 import config
 
 from cassandra.cluster import Cluster
 from cassandra.auth import PlainTextAuthProvider
-
 from datetime import datetime
+import json
 import os
 
 MODULE = os.path.basename(__file__)[:-3]
@@ -64,25 +64,6 @@ class DataStraxApi:
         )
         log_event('Loaded users and budgets tables', module=MODULE)
 
-    def insert(self, table: str, primary_key: str, data):
-        """
-        Insert data into table.
-
-        Args:
-            table (str): name of table to insert to.
-            primary_key (str): Primary Key of data.
-            data (dict): Data to insert.
-
-        Returns:
-            ResultSet: Response of execution of insertion.
-        """
-        response = self.session.execute(
-            f"INSERT INTO {TABLE_NAMES[table]} ({', '.join(data)}) VALUES ({'%s, ' * 2 + '%s'})", list(data.values())
-        )
-        updated_data_string = ', '.join(f'{name}: {value}' for name, value in data.items())
-        log_event(f"Inserted {table[:-1]} ({updated_data_string})", module=MODULE)
-        return response
-
     def get(self, table: str, primary_key: str=None):
         """
         Access data with primary key, or access all data
@@ -95,9 +76,58 @@ class DataStraxApi:
             Row (namedTuple): Data accessed
             ResultSet: Data accessed
         """
+        if TABLE_NAMES.get(table) is None:
+            event_log("Invalid table: {table}", module=MODULE)
+            return None
         if primary_key:
             return self.session.execute(f"SELECT * FROM {TABLE_NAMES[table]} WHERE {TABLE_FORMAT[table][0]}=%s", [primary_key]).one()
         return self.session.execute(f"SELECT * FROM {TABLE_NAMES[table]}")
+
+    def insert(self, table: str, data: dict, primary_key: str=None, budget_append: bool=False):
+        """
+        Insert data into table.
+
+        Args:
+            table (str): name of table to insert to.
+            data (dict): Data to insert.
+            primary_key (str, optional): Primary Key of data. Defaults to None
+            budget_append (bool): purchases should be appended
+
+        Returns:
+            ResultSet: Response of execution of insertion.
+        """
+        if TABLE_NAMES.get(table) is None:
+            event_log("Invalid table: {table}", module=MODULE)
+            return None
+        if primary_key is None:
+            primary_key = data.get(TABLE_FORMAT.get(table)[0])
+            if primary_key is None:
+                log_event(f"No primary key for {table} in {data}", module=MODULE)
+                return None
+        if 'total' in data.keys():
+            log_event(f"Attempted to reassign total to {data['total']} manually. Not Allowed.", module=MODULE)
+            return None
+        if 'purchases' in data.keys():
+            item = self.get(TABLE_NAMES[table], primary_key)
+            if item is not None:
+                purchases = json.loads(item.purchases)
+            else:
+                purchases = []
+            if budget_append:
+                new_purchases = data['purchases']
+                purchases += new_purchases
+            else:
+                purchases = data['purchases']
+            print(purchases)
+            data['total'] = round(sum(purchase['amount'] for purchase in purchases), 2)
+            data['purchases'] = json.dumps(purchases)
+
+        response = self.session.execute(
+            f"INSERT INTO {TABLE_NAMES[table]} ({', '.join(data)}) VALUES ({'%s, ' * (len(data) - 1) + '%s'})", list(data.values())
+        )
+        updated_data_string = ', '.join(f'{name}: {value}' for name, value in data.items())
+        log_event(f"Inserted {table[:-1]} ({updated_data_string})", module=MODULE)
+        return response
     
     def delete(self, table: str, primary_key: str):
         """
@@ -110,41 +140,13 @@ class DataStraxApi:
         Returns:
             ResultSet: Response of execution of deletion.
         """
-        prepared = self.session.prepare(f"DELETE FROM {TABLE_NAMES['users']} WHERE {TABLE_FORMAT[table][0]}=?")
+        if TABLE_NAMES.get(table) is None:
+            event_log("Invalid table", module=MODULE)
+            return None
+        prepared = self.session.prepare(f"DELETE FROM {TABLE_NAMES[table]} WHERE {TABLE_FORMAT[table][0]}=?")
         response = self.session.execute(prepared, [primary_key])
         log_event(f"Deleted {TABLE_FORMAT[table][0]}: {primary_key}", module=MODULE)
         return response
-
-    @staticmethod
-    def itemid(date: datetime, item_name: str):
-        """
-        Convet datetime object and string to itemid
-
-        Args:
-            date (datetime): Datetime accurate to month
-            item_name (str): Name of Item
-
-        Returns:
-            itemid (str): itemid
-        """
-        return f'{date.month}-{date.year}:{item_name}'
-    
-    @staticmethod
-    def parse_itemid(itemid: str):
-        """
-        Convert itemid to datetime object and name string.
-
-        Args:
-            itemid (str): itemid
-
-        Returns:
-            tuple: datetime object accurate to month and item name.
-        """
-        if '-' not in itemid or ':' not in itemid:
-            return None
-        date_string, item_name = itemid.split(':')
-        month, year = date_string.split('-')
-        return datetime(int(year), int(month), 1), item_name
 
 def main():
     users = {
@@ -152,13 +154,33 @@ def main():
         'neiphu': {'firstname': 'andrew', 'lastname': 'hong'}
     }
     db_api = DataStraxApi()
-    insert_response = db_api.insert(TABLE_NAMES['users'], 'neiphu', {'username': 'neiphu', 'firstname': users['neiphu']['firstname'], 'lastname': users['neiphu']['lastname']})
-    db_api.insert(TABLE_NAMES['users'], 'lougene', {'username': 'lougene', 'firstname': users['lougene']['firstname'], 'lastname': users['lougene']['lastname']})
-    get_response = db_api.get(TABLE_NAMES['users'], primary_key='lougene')
-    delete_response = db_api.delete(TABLE_NAMES['users'], 'lougene')
-    get_all_response = db_api.get(TABLE_NAMES['users'])
-    print(f"insert response ({type(insert_response)}): {insert_response}\nget response ({type(get_response)}): {get_response}\n"
-    f"delete response({type(delete_response)}): {delete_response}\nget all response ({type(get_all_response)}): {get_all_response}")
+    # insert_response = db_api.insert(TABLE_NAMES['users'], 'neiphu', {'username': 'neiphu', 'firstname': users['neiphu']['firstname'], 'lastname': users['neiphu']['lastname']})
+    # db_api.insert(TABLE_NAMES['users'], 'lougene', {'username': 'lougene', 'firstname': users['lougene']['firstname'], 'lastname': users['lougene']['lastname']})
+    # get_response = db_api.get(TABLE_NAMES['users'], primary_key='lougene')
+    # delete_response = db_api.delete(TABLE_NAMES['users'], 'lougene')
+    # get_all_response = db_api.get(TABLE_NAMES['users'])
+    item_data = [
+        {
+            'itemid': util.itemid(datetime.today(), 'food'),
+            'purchases': [util.make_purchase('breakfast', -12.36, datetime.today()), util.make_purchase('lunch', -15.75, datetime.today())]
+            # 'purchases': [util.make_purchase('dinner', -15.99, datetime.today())]
+        },
+        {
+            'purchases': [util.make_purchase('shirt', -14.99, datetime.today()), util.make_purchase('pants', -20, datetime.today())],
+            'itemid': util.itemid(datetime.today(), 'clothes')
+        }
+    ]
+    insert_response = db_api.insert(TABLE_NAMES['budgets'], item_data[0], budget_append=True)
+    db_api.insert(TABLE_NAMES['budgets'], item_data[1])
+    get_response = db_api.get(TABLE_NAMES['budgets'], primary_key=item_data[1]['itemid'])
+    delete_response = db_api.delete(TABLE_NAMES['budgets'], item_data[1]['itemid'])
+    get_all_response = db_api.get(TABLE_NAMES['budgets'])
+    print(
+        f"insert response ({type(insert_response)}): {insert_response}\n"
+        f"get response ({type(get_response)}): {get_response}\n"
+        f"delete response({type(delete_response)}): {delete_response}\n"
+        f"get all response ({type(get_all_response)}): {[response for response in get_all_response]}"
+        )
 
 if __name__ == '__main__':
     main()

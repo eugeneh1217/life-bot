@@ -1,16 +1,20 @@
-from datastrax_api import DataStraxApi as dsa
+from datastrax_api import DataStraxApi
 
 from datetime import datetime
+from unittest.mock import patch
 
 import unittest
 
+
 class TestDatastraxApi(unittest.TestCase):
 
-    def test_itemid(self):
-        self.assertEqual(dsa.itemid(datetime(2021, 1, 1), 'food'), '1-2021:food')
+    dsa = DataStraxApi()
 
-    def test_parse_itemid(self):
-        self.assertEqual(dsa.parse_itemid('1-2021:food'), (datetime(2021, 1, 1), 'food'))
+    @patch('cassandra.cluster.Cluster.connect')
+    def test_get(self, mock_session):
+        self.dsa.get('users')
+        mock_session.execute.assert_called_with('SELECT * FROM users')
+        
 
 if __name__ == '__main__':
     unittest.main()
