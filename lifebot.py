@@ -7,6 +7,6 @@ while(isRunning):
     individual_words = transcript.split(" ")
     if "robot" in individual_words:
         print("botro")
+    else:
+        print(individual_words[0])
 
-
-        
