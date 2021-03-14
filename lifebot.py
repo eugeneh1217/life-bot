@@ -23,8 +23,8 @@ while(isRunning):
             command_data[command] = {'index': individual_words.index(command)}
     for command in range(len(command_data)):
         command['args'] = individual_words[command['index'] + 1:next_command_index(command['index'], command_data)]
-    # if "robot" in individual_words:
-    #     print("botro")
-    # else:
-    #     print(individual_words[0])
+    if "robot" in individual_words:
+        print("botro")
+    else:
+        print(individual_words[0])
 
