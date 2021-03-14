@@ -4,9 +4,12 @@ import config
 
 from cassandra.cluster import Cluster
 from cassandra.auth import PlainTextAuthProvider
+from collections import namedtuple
 from datetime import datetime
 import json
 import os
+
+BudgetKey = namedtuple('BudgetKey', ['owner', 'date', 'name'])
 
 MODULE = os.path.basename(__file__)[:-3]
 
@@ -19,14 +22,27 @@ TABLE_FORMAT = {
     TABLE_NAMES['users']: [
         'username',
         'firstname',
-        'lastname'
+        'lastname',
+        'budget'
     ],
     TABLE_NAMES['budgets']: [
-        'itemid',
-        'total',
-        'purchases'
+        "owner text",
+        "name text",
+        "date text",
+        "principle",
+        "spent",
+        "purchases",
+        "PRIMARY KEY (owner, date, name)"
     ]
 }
+
+PRIMARY_KEY_PARTS = ['owner', 'date', 'name']
+
+def validate_table(func, table, *args):
+    if TABLE_NAMES.get(table) is None:
+        event_log("Invalid table: {table}", module=MODULE)
+        return None
+    func(table, *args)
 
 class DataStraxApi:
     def __init__(self):
@@ -49,78 +65,76 @@ class DataStraxApi:
             CREATE TABLE IF NOT EXISTS {KEYSPACE}.{TABLE_NAMES['users']} (
                     username text PRIMARY KEY,
                     firstname text,
-                    lastname text
+                    lastname text,
+                    budget text
                 );
             """
         )
         self.session.execute(
             f"""
             CREATE TABLE IF NOT EXISTS {KEYSPACE}.{TABLE_NAMES['budgets']} (
-                    itemid text PRIMARY KEY,
-                    total float,
-                    purchases text
+                    owner text,
+                    date text,
+                    name text,
+                    principle float,
+                    spent float,
+                    purchases text,
+                    PRIMARY KEY (owner, date, name)
                 );
             """
         )
         log_event('Loaded users and budgets tables', module=MODULE)
 
-    def get(self, table: str, primary_key: str=None):
-        """
-        Access data with primary key, or access all data
-
-        Args:
-            primary_key (str, optional): Primary key of data to access. Defaults to None.
-            table (str): Name of table to access.
-
-        Returns:
-            Row (namedTuple): Data accessed
-            ResultSet: Data accessed
-        """
-        if TABLE_NAMES.get(table) is None:
-            event_log("Invalid table: {table}", module=MODULE)
-            return None
+    @validate_table
+    def get(self, table, primary_key=None):
+        # access specific key
         if primary_key:
-            return self.session.execute(f"SELECT * FROM {TABLE_NAMES[table]} WHERE {TABLE_FORMAT[table][0]}=%s", [primary_key]).one()
+            if table == 'budgets':
+                if type(primary_key) is not BudgetKey:
+                    log_event(f"Invalid primary key for budgets table: {type(primary_key)}", module=MODULE)
+                    return None
+                return self.session.execute(f"SELECT * FROM {TABLE_NAMES[table]} WHERE {' AND '.join([key + '=%s' for key in PRIMARY_KEY_PARTS[:len(primary_key)]])}", list(primary_key)).one()
+            else:
+                return self.session.execute(f"SELECT * FROM {TABLE_NAMES[table]} WHERE {TABLE_FORMAT[table][0]}=%s", [primary_key]).one()
         return self.session.execute(f"SELECT * FROM {TABLE_NAMES[table]}")
 
-    def insert(self, table: str, data: dict, primary_key: str=None, budget_append: bool=False):
-        """
-        Insert data into table.
-
-        Args:
-            table (str): name of table to insert to.
-            data (dict): Data to insert.
-            primary_key (str, optional): Primary Key of data. Defaults to None
-            budget_append (bool): purchases should be appended
-
-        Returns:
-            ResultSet: Response of execution of insertion.
-        """
-        if TABLE_NAMES.get(table) is None:
-            event_log("Invalid table: {table}", module=MODULE)
+    @validate_table
+    def insert(self, table: str, data: dict, primary_key=None, budget_append: bool=False):
+        # catch attempts to edit spent
+        if 'spent' in data.keys():
+            log_event(f"Attempted to reassign spent to {data['spent']} manually. Not Allowed.", module=MODULE)
             return None
-        if primary_key is None:
+        # if not budgets, check data for primary_key
+        if primary_key is None and table != 'budgets':
             primary_key = data.get(TABLE_FORMAT.get(table)[0])
             if primary_key is None:
                 log_event(f"No primary key for {table} in {data}", module=MODULE)
                 return None
-        if 'total' in data.keys():
-            log_event(f"Attempted to reassign total to {data['total']} manually. Not Allowed.", module=MODULE)
-            return None
+        # handle editing purchase
         if 'purchases' in data.keys():
             item = self.get(TABLE_NAMES[table], primary_key)
-            if item is not None:
+            # check if purchases already there
+            if item.purchases is not None:
                 purchases = json.loads(item.purchases)
             else:
                 purchases = []
+            # should we append or replace past purchases
             if budget_append:
                 new_purchases = data['purchases']
                 purchases += new_purchases
             else:
                 purchases = data['purchases']
-            print(purchases)
-            data['total'] = round(sum(purchase['amount'] for purchase in purchases), 2)
+            # udpate spent and purchases
+            data['spent'] = round(sum(purchase['amount'] for purchase in purchases), 2)
             data['purchases'] = json.dumps(purchases)
+            # owner = self.get('users', BudgetKey(data['owner'], data['date'], data['name']))
+            # owner_budget = owner['budget']
+            # if owner_budgets:
+            #     owner_budget = json.loads(owner_budget)
+            # else:
+            #     owner_budget = []
+            # owner_budget.append(f"{data['date']} {data['name']}")
+            # insert
 
         response = self.session.execute(
             f"INSERT INTO {TABLE_NAMES[table]} ({', '.join(data)}) VALUES ({'%s, ' * (len(data) - 1) + '%s'})", list(data.values())
@@ -129,58 +143,37 @@ class DataStraxApi:
         log_event(f"Inserted {table[:-1]} ({updated_data_string})", module=MODULE)
         return response
     
-    def delete(self, table: str, primary_key: str):
-        """
-        Delete row with primary key.
-
-        Args:
-            table (str): Name of table to change.
-            primary_key (str): Primary key of row to delete.
-
-        Returns:
-            ResultSet: Response of execution of deletion.
-        """
-        if TABLE_NAMES.get(table) is None:
-            event_log("Invalid table", module=MODULE)
-            return None
-        prepared = self.session.prepare(f"DELETE FROM {TABLE_NAMES[table]} WHERE {TABLE_FORMAT[table][0]}=?")
-        response = self.session.execute(prepared, [primary_key])
+    @validate_table
+    def delete(self, table: str, primary_key):
+        if table == 'budgets':
+            print(f"DELETE FROM {TABLE_NAMES[table]} WHERE {' AND '.join([key + '=%s' for key in PRIMARY_KEY_PARTS[:len(primary_key)]])}, {list(primary_key)}")
+            prepared = self.session.prepare(f"DELETE FROM {TABLE_NAMES[table]} WHERE {' AND '.join([key + '=?' for key in PRIMARY_KEY_PARTS[:len(primary_key)]])}")
+            response = self.session.execute(prepared, list(primary_key))
+        else:
+            prepared = self.session.prepare(f"DELETE FROM {TABLE_NAMES[table]} WHERE {TABLE_FORMAT[table][0]}=?")
+            response = self.session.execute(prepared, [primary_key])
         log_event(f"Deleted {TABLE_FORMAT[table][0]}: {primary_key}", module=MODULE)
         return response
 
 def main():
-    users = {
-        'lougene': {'firstname': 'eugene', 'lastname': 'hong'},
-        'neiphu': {'firstname': 'andrew', 'lastname': 'hong'}
-    }
     db_api = DataStraxApi()
-    # insert_response = db_api.insert(TABLE_NAMES['users'], 'neiphu', {'username': 'neiphu', 'firstname': users['neiphu']['firstname'], 'lastname': users['neiphu']['lastname']})
-    # db_api.insert(TABLE_NAMES['users'], 'lougene', {'username': 'lougene', 'firstname': users['lougene']['firstname'], 'lastname': users['lougene']['lastname']})
-    # get_response = db_api.get(TABLE_NAMES['users'], primary_key='lougene')
-    # delete_response = db_api.delete(TABLE_NAMES['users'], 'lougene')
-    # get_all_response = db_api.get(TABLE_NAMES['users'])
-    item_data = [
-        {
-            'itemid': util.itemid(datetime.today(), 'food'),
-            'purchases': [util.make_purchase('breakfast', -12.36, datetime.today()), util.make_purchase('lunch', -15.75, datetime.today())]
-            # 'purchases': [util.make_purchase('dinner', -15.99, datetime.today())]
-        },
-        {
-            'purchases': [util.make_purchase('shirt', -14.99, datetime.today()), util.make_purchase('pants', -20, datetime.today())],
-            'itemid': util.itemid(datetime.today(), 'clothes')
-        }
-    ]
-    insert_response = db_api.insert(TABLE_NAMES['budgets'], item_data[0], budget_append=True)
-    db_api.insert(TABLE_NAMES['budgets'], item_data[1])
-    get_response = db_api.get(TABLE_NAMES['budgets'], primary_key=item_data[1]['itemid'])
-    delete_response = db_api.delete(TABLE_NAMES['budgets'], item_data[1]['itemid'])
-    get_all_response = db_api.get(TABLE_NAMES['budgets'])
-    print(
-        f"insert response ({type(insert_response)}): {insert_response}\n"
-        f"get response ({type(get_response)}): {get_response}\n"
-        f"delete response({type(delete_response)}): {delete_response}\n"
-        f"get all response ({type(get_all_response)}): {[response for response in get_all_response]}"
-        )
+    db_api.insert('budgets', {
+        'owner': 'lougene',
+        'name': 'food',
+        'date': datetime.today().strftime('%m/%Y'),
+        'principle': 500,
+    })
+    # need to get all three of primary key to insert something
+    db_api.insert('budgets', {
+        'owner': 'lougene',
+        'date': '03/2021',
+        'name': 'food',
+        'purchases': [util.make_purchase('shirt', -14.99, datetime.today()), util.make_purchase('pants', -20, datetime.today())]
+    }, primary_key=BudgetKey('lougene', '03/2021', 'food'))
+    db_api.delete(
+        'budgets', primary_key=BudgetKey('lougene', '03/2021', 'food')
+    )
+
 
 if __name__ == '__main__':
     main()

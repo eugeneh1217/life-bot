@@ -15,13 +15,14 @@ def log_event(message, module: str=None):
     """
     print(f"[{str(module) + ' | ' if module is not None else ''}{datetime.now().strftime('%H:%M:%S')}] {message}")
 
-def itemid(date: datetime, item_name: str):
+def itemid(date: datetime, item_name: str, owner: str):
     """
     Convet datetime object and string to itemid
 
     Args:
         date (datetime): Datetime accurate to month
         item_name (str): Name of Item
+        owner (str): Ownder of budget
 
     Returns:
         itemid (str): itemid
