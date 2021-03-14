@@ -1,4 +1,4 @@
-from datastrax_api import DataStraxApi, BudgetKey
+from datastax_api import DataStaxApi, BudgetKey
 
 from datetime import datetime
 from unittest.mock import patch
@@ -6,11 +6,11 @@ from unittest.mock import patch
 import unittest
 
 @patch('cassandra.cluster.Cluster.connect')
-class TestDatastraxApi(unittest.TestCase):
+class TestDatastaxApi(unittest.TestCase):
 
-    dsa = DataStraxApi()
+    dsa = DataStaxApi()
 
-    @patch('datastrax_api.DataStraxApi.session.execute')
+    @patch('datastax_api.DataStaxApi.session.execute')
     def test_get_all(self, mock_execute):
         self.dsa.get('users')
         mock_session.execute.assert_called_with('SELECT * FROM users')

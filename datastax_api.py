@@ -47,7 +47,7 @@ def validate_table(func):
         return func(*args, **kwargs)
     return wrapper
 
-class DataStraxApi:
+class DataStaxApi:
     def __init__(self):
         secure_bundle_path = f'{os.path.dirname(os.path.realpath(__file__))}/secure-connect-life-bot-db.zip'
         cloud_config = {
@@ -169,7 +169,7 @@ class DataStraxApi:
         return response
 
 def main():
-    db_api = DataStraxApi()
+    db_api = DataStaxApi()
     db_api.insert('budgets', {
         'owner': 'lougene',
         'name': 'food',
