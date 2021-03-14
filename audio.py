@@ -35,13 +35,13 @@ def get_audio():
         if start_record(stream) == True:
             isRecording = True
         elif isRecording:
-            print("nothing")
+            #print("nothing")
             for i in range(0,int(RATE/CHUNK*BUFFER_TIME)):
                 data=stream.read(CHUNK)
                 data_chunk=array('h',data)
                 vol=max(data_chunk)
                 if(vol>=MIN_VOLUME):
-                    print("something said")
+                    #print("something said")
                     frames.append(data)
             break
 

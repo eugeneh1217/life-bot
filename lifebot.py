@@ -1,30 +1,36 @@
 import audio
-
+from datetime import datetime
+from datastax_api import DataStaxApi, LogKey
 COMMANDS = [
-    'log'
+    'logs'
 ]
 
-def next_command_index(current_index, command_data):
-    next_command = len(command_data) - 1
-    keys = list(command_data.keys())
-    for key in keys:
-        if command_data[key]['index'] > current_index and command_data[key]['index'] < next_command:
-            next_command = command_data[key]['index']
-    return next_command
+def find_command(command, words):
+    # return index of command
+    return words.index(command)
 
 isRunning = True
 
+db = DataStaxApi()
+
+current_index = 0
 while(isRunning):
     command_data = {}
     transcript = audio.get_audio()
     individual_words = transcript.split(" ")
+    individual_words = individual_words[current_index:]
+    print(individual_words)
     for command in COMMANDS:
-        if command in individual_words:
-            command_data[command] = {'index': individual_words.index(command)}
-    for command in range(len(command_data)):
-        command['args'] = individual_words[command['index'] + 1:next_command_index(command['index'], command_data)]
-    if "robot" in individual_words:
-        print("botro")
-    else:
-        print(individual_words[0])
+        command_index = find_command(command, individual_words)
+    args = individual_words[command_index + 1:]
+    if individual_words[command_index] == 'logs':
+        if args[0] == 'read':
+            
+            message = db.get('logs', primary_key=LogKey('lougene', datetime.today().strftime('%m/%d/%y')))['content']
+            print(f"log_0: {message}")
+        elif args[0] == 'new':
+            message = ' '.join(args[1:])
+            db.insert('logs', {'owner': 'lougene', 'date': datetime.today().strftime('%m/%d/%y'), 'content': message})
+            print("Log recorded")
+    current_index = len(individual_words)
 

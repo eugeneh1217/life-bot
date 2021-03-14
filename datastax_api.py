@@ -10,6 +10,7 @@ import json
 import os
 
 BudgetKey = namedtuple('BudgetKey', ['owner', 'date', 'name'])
+LogKey = namedtuple('LogKey', ['owner', 'date'])
 
 MODULE = os.path.basename(__file__)[:-3]
 
@@ -37,12 +38,12 @@ TABLE_FORMAT = {
     ]
 }
 
-PRIMARY_KEY_PARTS = ['owner', 'date', 'name']
+PRIMARY_KEY_PARTS = {'budgets': ['owner', 'date', 'name'], 'logs': ['owner', 'date']}
 
 def validate_table(func):
     def wrapper(*args, **kwargs):
-        if TABLE_NAMES.get(args[0]) is None:
-            log_event("Invalid table: {table}", module=MODULE)
+        if TABLE_NAMES.get(args[1]) is None:
+            log_event(f"Invalid table: {args[1]}", module=MODULE)
             return None
         return func(*args, **kwargs)
     return wrapper
@@ -102,11 +103,21 @@ class DataStaxApi:
     def get(self, table, primary_key=None):
         # access specific key
         if primary_key:
-            if table == 'budgets':
-                if type(primary_key) is not BudgetKey:
-                    log_event(f"Invalid primary key for budgets table: {type(primary_key)}", module=MODULE)
-                    return None
-                return self.session.execute(f"SELECT * FROM {TABLE_NAMES[table]} WHERE {' AND '.join([key + '=%s' for key in PRIMARY_KEY_PARTS[:len(primary_key)]])}", list(primary_key)).one()
+            # print(table)
+            if table == 'budgets' or table == 'logs':
+                if table == 'budgets':
+                    if type(primary_key) is not BudgetKey:
+                        log_event(f"Invalid primary key for budgets table: {type(primary_key)}", module=MODULE)
+                        return None
+                if table == 'logs':
+                    if type(primary_key) is not LogKey:
+                        log_event(f"Invalid primary key for logs table: {type(primary_key)}", module=MODULE)
+                        return None
+                attributes = ' AND '.join([key + '=\'' + getattr(primary_key, key) + '\'' for key in PRIMARY_KEY_PARTS[table][:len(primary_key)]])
+                print(f"SELECT * FROM users.{TABLE_NAMES[table]} WHERE {attributes} ALLOW FILTERING")
+                # return self.session.execute(f"SELECT * FROM {TABLE_NAMES[table]} WHERE {' AND '.join([key + '=%s' for key in PRIMARY_KEY_PARTS[table][:len(primary_key)]])} ALLOW FILTERING", list(primary_key)).one()
+                return self.session.execute(f"SELECT * FROM users.{TABLE_NAMES[table]} WHERE {attributes} ALLOW FILTERING").one()
+
             else:
                 return self.session.execute(f"SELECT * FROM {TABLE_NAMES[table]} WHERE {TABLE_FORMAT[table][0]}=%s", [primary_key]).one()
         return self.session.execute(f"SELECT * FROM {TABLE_NAMES[table]}")
@@ -146,7 +157,7 @@ class DataStaxApi:
         )
         owner = self.get('users', BudgetKey(data['owner'], data['date'], data['name']))
         owner_budget = owner['budget']
-        if owner_budgets:
+        if owner_budget:
             owner_budget = json.loads(owner_budget)
         else:
             owner_budget = []
@@ -170,22 +181,25 @@ class DataStaxApi:
 
 def main():
     db_api = DataStaxApi()
-    db_api.insert('budgets', {
-        'owner': 'lougene',
-        'name': 'food',
-        'date': datetime.today().strftime('%m/%Y'),
-        'principle': 500,
-    })
-    # need to get all three of primary key to insert something
-    db_api.insert('budgets', {
-        'owner': 'lougene',
-        'date': '03/2021',
-        'name': 'food',
-        'purchases': [util.make_purchase('shirt', -14.99, datetime.today()), util.make_purchase('pants', -20, datetime.today())]
-    }, primary_key=BudgetKey('lougene', '03/2021', 'food'))
-    db_api.delete(
-        'budgets', primary_key=BudgetKey('lougene', '03/2021', 'food')
-    )
+    print(db_api.get('logs')[0])
+    print(db_api.get('logs', primary_key=LogKey('lougene', datetime.today().strftime('%m/%d/%y'))))
+
+    # db_api.insert('budgets', {
+    #     'owner': 'lougene',
+    #     'name': 'food',
+    #     'date': datetime.today().strftime('%m/%Y'),
+    #     'principle': 500,
+    # })
+    # # need to get all three of primary key to insert something
+    # db_api.insert('budgets', {
+    #     'owner': 'lougene',
+    #     'date': '03/2021',
+    #     'name': 'food',
+    #     'purchases': [util.make_purchase('shirt', -14.99, datetime.today()), util.make_purchase('pants', -20, datetime.today())]
+    # }, primary_key=BudgetKey('lougene', '03/2021', 'food'))
+    # db_api.delete(
+    #     'budgets', primary_key=BudgetKey('lougene', '03/2021', 'food')
+    # )
 
 
 if __name__ == '__main__':
