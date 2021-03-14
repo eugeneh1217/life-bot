@@ -1,6 +1,7 @@
 config.py
 secure-connect-life-bot-db.zip
 GeneratedToken
+audio.wav
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
