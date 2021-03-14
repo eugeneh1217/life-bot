@@ -16,7 +16,8 @@ MODULE = os.path.basename(__file__)[:-3]
 KEYSPACE = 'users'
 TABLE_NAMES = {
     'users': 'users',
-    'budgets': 'budgets'
+    'budgets': 'budgets',
+    'logs': 'logs'
 }
 TABLE_FORMAT = {
     TABLE_NAMES['users']: [
@@ -38,11 +39,13 @@ TABLE_FORMAT = {
 
 PRIMARY_KEY_PARTS = ['owner', 'date', 'name']
 
-def validate_table(func, table, *args):
-    if TABLE_NAMES.get(table) is None:
-        event_log("Invalid table: {table}", module=MODULE)
-        return None
-    func(table, *args)
+def validate_table(func):
+    def wrapper(*args, **kwargs):
+        if TABLE_NAMES.get(args[0]) is None:
+            log_event("Invalid table: {table}", module=MODULE)
+            return None
+        return func(*args, **kwargs)
+    return wrapper
 
 class DataStraxApi:
     def __init__(self):
@@ -80,6 +83,16 @@ class DataStraxApi:
                     spent float,
                     purchases text,
                     PRIMARY KEY (owner, date, name)
+                );
+            """
+        )
+        self.session.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {KEYSPACE}.{TABLE_NAMES['logs']} (
+                    owner text,
+                    date text,
+                    content text,
+                    PRIMARY KEY (owner, date)
                 );
             """
         )
@@ -127,18 +140,18 @@ class DataStraxApi:
             # udpate spent and purchases
             data['spent'] = round(sum(purchase['amount'] for purchase in purchases), 2)
             data['purchases'] = json.dumps(purchases)
-            # owner = self.get('users', BudgetKey(data['owner'], data['date'], data['name']))
-            # owner_budget = owner['budget']
-            # if owner_budgets:
-            #     owner_budget = json.loads(owner_budget)
-            # else:
-            #     owner_budget = []
-            # owner_budget.append(f"{data['date']} {data['name']}")
-            # insert
 
         response = self.session.execute(
             f"INSERT INTO {TABLE_NAMES[table]} ({', '.join(data)}) VALUES ({'%s, ' * (len(data) - 1) + '%s'})", list(data.values())
         )
+        owner = self.get('users', BudgetKey(data['owner'], data['date'], data['name']))
+        owner_budget = owner['budget']
+        if owner_budgets:
+            owner_budget = json.loads(owner_budget)
+        else:
+            owner_budget = []
+        owner_budget.append(f"{data['date']} {data['name']}")
+        self.insert('users', {'budget': owner_budget}, primary_key=data['owner'])
         updated_data_string = ', '.join(f'{name}: {value}' for name, value in data.items())
         log_event(f"Inserted {table[:-1]} ({updated_data_string})", module=MODULE)
         return response
