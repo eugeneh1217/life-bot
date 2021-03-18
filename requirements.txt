@@ -1,7 +1,0 @@
-flask
-cassandra-driver
-freezegun
-SpeechRecognition
-pyaudio
-os-sys
-Wave
