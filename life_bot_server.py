@@ -8,15 +8,17 @@ from itsdangerous import (
 
 import os
 
+import config
+
 # endpoint references
 USER_ENDPOINT_BODY = '/api/users'
 RESOURCE_ENDPOINT_BODY = '/api/budgets'
 
 # app configs
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'how many woog wiggles does it take to wiggle a woogasaur'
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///databases/life_bot.db'
-app.config['SQLALCHEMY_COMMIT_ON_TEARDOWN'] = True
+app.config['SECRET_KEY'] = config.SECREKT_KEY
+app.config['SQLALCHEMY_DATABASE_URI'] = config.SQLALCHEMY_DATABASE_URI
+app.config['SQLALCHEMY_COMMIT_ON_TEARDOWN'] = config.SQLALCHEMY_COMMIT_ON_TEARDOWN
 
 # extensions
 db = SQLAlchemy(app)

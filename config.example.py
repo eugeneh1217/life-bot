@@ -1,0 +1,3 @@
+SECREKT_KEY = ''
+SQLALCHEMY_DATABASE_URI = 'sqlite:///databases/life_bot.db'
+SQLALCHEMY_COMMIT_ON_TEARDOWN = True
