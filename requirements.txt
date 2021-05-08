@@ -1,1 +1,13 @@
+# testing
 coverage
+
+# api
+flask
+flask_sqlalchemy
+passlib
+flask_httpauth
+
+# pylint
+pylint
+pylint-flask
+pylint-flask_sqlalchemy
